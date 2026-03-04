@@ -1,0 +1,46 @@
+name: Slack ナレッジ登録
+
+on:
+  repository_dispatch:
+    types: [slack-knowledge-submitted]
+
+jobs:
+  save-knowledge:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: リポジトリをチェックアウト
+        uses: actions/checkout@v4
+
+      - name: Markdownファイルを生成してコミット
+        run: |
+          TITLE="${{ github.event.client_payload.title }}"
+          CATEGORY="${{ github.event.client_payload.category }}"
+          BODY="${{ github.event.client_payload.body }}"
+          TAGS="${{ github.event.client_payload.tags }}"
+          AUTHOR="${{ github.event.client_payload.author }}"
+          DATE=$(date +%Y-%m-%d)
+          SAFE_TITLE=$(echo "$TITLE" | tr ' ' '-' | tr -cd 'a-zA-Z0-9-')
+          if [ -z "$SAFE_TITLE" ]; then SAFE_TITLE="knowledge"; fi
+          FILENAME="knowledge/${DATE}-${SAFE_TITLE}.md"
+          mkdir -p knowledge
+          printf '%s\n' \
+            '---' \
+            "date: $DATE" \
+            "title: \"$TITLE\"" \
+            "category: \"$CATEGORY\"" \
+            "tags: [$TAGS]" \
+            "author: $AUTHOR" \
+            '---' \
+            '' \
+            "# $TITLE" \
+            '' \
+            "$BODY" \
+            > "$FILENAME"
+          git config user.email "github-actions@github.com"
+          git config user.name "GitHub Actions"
+          git add .
+          git commit -m "docs: ナレッジ追加「${TITLE}」"
+          git push
