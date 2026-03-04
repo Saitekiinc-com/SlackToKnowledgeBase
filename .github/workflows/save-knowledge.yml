@@ -19,19 +19,18 @@ jobs:
           TITLE="${{ github.event.client_payload.title }}"
           CATEGORY="${{ github.event.client_payload.category }}"
           BODY="${{ github.event.client_payload.body }}"
-          TAGS="${{ github.event.client_payload.tags }}"
           AUTHOR="${{ github.event.client_payload.author }}"
           DATE=$(date +%Y-%m-%d)
-          SAFE_TITLE=$(echo "$TITLE" | tr ' ' '-' | tr -cd 'a-zA-Z0-9-')
+          TIME=$(date +%H%M%S)
+          SAFE_TITLE=$(echo "$TITLE" | tr ' ' '-' | sed 's/[^a-zA-Z0-9-]//g')
           if [ -z "$SAFE_TITLE" ]; then SAFE_TITLE="knowledge"; fi
-          FILENAME="knowledge/${DATE}-${SAFE_TITLE}.md"
+          FILENAME="knowledge/${DATE}-${TIME}-${SAFE_TITLE}.md"
           mkdir -p knowledge
           printf '%s\n' \
             '---' \
             "date: $DATE" \
             "title: \"$TITLE\"" \
             "category: \"$CATEGORY\"" \
-            "tags: [$TAGS]" \
             "author: $AUTHOR" \
             '---' \
             '' \
@@ -44,3 +43,4 @@ jobs:
           git add .
           git commit -m "docs: ナレッジ追加「${TITLE}」"
           git push
+
