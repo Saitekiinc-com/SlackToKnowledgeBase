@@ -15,32 +15,49 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Markdownファイルを生成してコミット
+        env:
+          TITLE: ${{ github.event.client_payload.title }}
+          CATEGORY: ${{ github.event.client_payload.category }}
+          BODY: ${{ github.event.client_payload.body }}
+          AUTHOR: ${{ github.event.client_payload.author }}
         run: |
-          TITLE="${{ github.event.client_payload.title }}"
-          CATEGORY="${{ github.event.client_payload.category }}"
-          BODY="${{ github.event.client_payload.body }}"
-          AUTHOR="${{ github.event.client_payload.author }}"
-          DATE=$(date +%Y-%m-%d)
-          TIME=$(date +%H%M%S)
-          SAFE_TITLE=$(echo "$TITLE" | tr ' ' '-' | sed 's/[^a-zA-Z0-9-]//g')
-          if [ -z "$SAFE_TITLE" ]; then SAFE_TITLE="knowledge"; fi
-          FILENAME="knowledge/${DATE}-${TIME}-${SAFE_TITLE}.md"
-          mkdir -p knowledge
-          printf '%s\n' \
-            '---' \
-            "date: $DATE" \
-            "title: \"$TITLE\"" \
-            "category: \"$CATEGORY\"" \
-            "author: $AUTHOR" \
-            '---' \
-            '' \
-            "# $TITLE" \
-            '' \
-            "$BODY" \
-            > "$FILENAME"
-          git config user.email "github-actions@github.com"
-          git config user.name "GitHub Actions"
-          git add .
-          git commit -m "docs: ナレッジ追加「${TITLE}」"
-          git push
+          python3 << 'PYEOF'
+          import os, re, subprocess
+          from datetime import datetime
 
+          title    = os.environ.get('TITLE', 'knowledge')
+          category = os.environ.get('CATEGORY', '')
+          body     = os.environ.get('BODY', '')
+          author   = os.environ.get('AUTHOR', '')
+
+          now = datetime.now()
+          date = now.strftime('%Y-%m-%d')
+          time = now.strftime('%H%M%S')
+          safe_title = re.sub(r'[^a-zA-Z0-9-]', '', title.replace(' ', '-')) or 'knowledge'
+          filename = f'knowledge/{date}-{time}-{safe_title}.md'
+
+          content = f'''---
+          date: {date}
+          title: "{title}"
+          category: "{category}"
+          author: {author}
+          ---
+
+          # {title}
+
+          {body}
+          '''
+          # インデント除去
+          import textwrap
+          content = textwrap.dedent(content)
+
+          os.makedirs('knowledge', exist_ok=True)
+          with open(filename, 'w', encoding='utf-8') as f:
+              f.write(content)
+
+          subprocess.run(['git', 'config', 'user.email', 'github-actions@github.com'], check=True)
+          subprocess.run(['git', 'config', 'user.name', 'GitHub Actions'], check=True)
+          subprocess.run(['git', 'add', '.'], check=True)
+          subprocess.run(['git', 'commit', '-m', f'docs: ナレッジ追加「{title}」'], check=True)
+          subprocess.run(['git', 'push'], check=True)
+          PYEOF
