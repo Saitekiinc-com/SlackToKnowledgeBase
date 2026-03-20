@@ -9,55 +9,97 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      pull-requests: write
 
     steps:
       - name: リポジトリをチェックアウト
         uses: actions/checkout@v4
 
-      - name: Markdownファイルを生成してコミット
+      - name: Markdownファイルを生成してPRを作成
         env:
-          TITLE: ${{ github.event.client_payload.title }}
-          CATEGORY: ${{ github.event.client_payload.category }}
-          BODY: ${{ github.event.client_payload.body }}
-          AUTHOR: ${{ github.event.client_payload.author }}
+          TITLE: ${{ toJSON(github.event.client_payload.title) }}
+          WHY: ${{ toJSON(github.event.client_payload.why) }}
+          HOW: ${{ toJSON(github.event.client_payload.how) }}
+          RESULT: ${{ toJSON(github.event.client_payload.result) }}
+          TOOLS: ${{ toJSON(github.event.client_payload.tools) }}
+          AUTHOR: ${{ toJSON(github.event.client_payload.author) }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           python3 << 'PYEOF'
-          import os, re, subprocess
-          from datetime import datetime
+          import os, re, subprocess, json
+          from datetime import datetime, timezone, timedelta
 
-          title    = os.environ.get('TITLE', 'knowledge')
-          category = os.environ.get('CATEGORY', '')
-          body     = os.environ.get('BODY', '')
-          author   = os.environ.get('AUTHOR', '')
+          def get_val(key, default=''):
+              val_str = os.environ.get(key, '')
+              try:
+                  val = json.loads(val_str)
+                  if isinstance(val, list):
+                      return ', '.join(str(x) for x in val)
+                  if val is None:
+                      return default
+                  return str(val)
+              except Exception:
+                  return val_str or default
 
-          now = datetime.now()
+          title  = get_val('TITLE', 'knowledge')
+          why    = get_val('WHY', '')
+          how    = get_val('HOW', '')
+          result = get_val('RESULT', '')
+          tools  = get_val('TOOLS', '')
+          author = get_val('AUTHOR', '')
+
+          JST = timezone(timedelta(hours=9))
+          now = datetime.now(JST)
           date = now.strftime('%Y-%m-%d')
-          time = now.strftime('%H%M%S')
-          safe_title = re.sub(r'[^a-zA-Z0-9-]', '', title.replace(' ', '-')) or 'knowledge'
-          filename = f'knowledge/{date}-{time}-{safe_title}.md'
+          time_str = now.strftime('%H%M%S')
+          
+          # ファイル名に使えない文字のみ除去し、日本語タイトルをそのまま反映
+          safe_title = re.sub(r'[\\/:*?"<>|\n\r\t]', '', title.replace(' ', '-'))
+          safe_title = safe_title.strip('-') if safe_title.strip('-') else 'knowledge'
+          filename = f'knowledge/{date}-{time_str}-{safe_title}.md'
 
-          content = f'''---
-          date: {date}
-          title: "{title}"
-          category: "{category}"
-          author: {author}
-          ---
+          # MarkdownのFrontmatter構築
+          metadata = {
+              "date": date,
+              "title": title,
+              "author": author
+          }
+          frontmatter_lines = [f"{k}: {json.dumps(v, ensure_ascii=False)}" for k, v in metadata.items()]
+          frontmatter_yaml = "\n".join(frontmatter_lines)
 
-          # {title}
-
-          {body}
-          '''
-          # インデント除去
-          import textwrap
-          content = textwrap.dedent(content)
+          content = (
+              f"---\n{frontmatter_yaml}\n---\n\n"
+              f"# {title}\n\n"
+              f"## 背景、課題\n{why}\n\n"
+              f"## 手段\n{how}\n\n"
+              f"## 結果\n{result}\n\n"
+              f"## ツールやAIのモデル\n{tools}\n"
+          )
 
           os.makedirs('knowledge', exist_ok=True)
           with open(filename, 'w', encoding='utf-8') as f:
               f.write(content)
 
-          subprocess.run(['git', 'config', 'user.email', 'github-actions@github.com'], check=True)
-          subprocess.run(['git', 'config', 'user.name', 'GitHub Actions'], check=True)
-          subprocess.run(['git', 'add', '.'], check=True)
-          subprocess.run(['git', 'commit', '-m', f'docs: ナレッジ追加「{title}」'], check=True)
-          subprocess.run(['git', 'push'], check=True)
+          # ブランチ名は確実に一意になるようにタイムスタンプを使用
+          branch_name = f"knowledge_{date.replace('-', '')}{time_str}"
+          # PRタイトルは省略された英数字のsafe_titleではなく、元のタイトルをそのまま使用
+          pr_title = f"{title} の追加マージ依頼"
+
+          def run_cmd(cmd):
+              result = subprocess.run(cmd, capture_output=True, text=True)
+              if result.stdout:
+                  print(result.stdout)
+              if result.returncode != 0:
+                  print(f"::error::Command failed: {' '.join(cmd)}")
+                  print(f"stderr: {result.stderr}")
+                  result.check_returncode()
+              return result
+
+          run_cmd(['git', 'config', 'user.email', 'github-actions@github.com'])
+          run_cmd(['git', 'config', 'user.name', 'GitHub Actions'])
+          run_cmd(['git', 'checkout', '-b', branch_name])
+          run_cmd(['git', 'add', filename])
+          run_cmd(['git', 'commit', '-m', f'docs: ナレッジ追加「{title}」'])
+          run_cmd(['git', 'push', '-u', 'origin', branch_name])
+          run_cmd(['gh', 'pr', 'create', '--base', 'main', '--head', branch_name, '--title', pr_title, '--body', f'Slackからナレッジ「{title}」が登録されました。'])
           PYEOF
