@@ -1,0 +1,63 @@
+name: ナレッジグラフ登録
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'knowledge/**/*.md'   # knowledge配下の.md変更時のみ起動
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  register-graph:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: リポジトリをチェックアウト
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2        # 差分検出のため直前コミットも取得
+
+      - name: 変更された.mdファイルを特定
+        id: changed
+        run: |
+          # 今回のpushで追加・変更されたknowledge/*.mdを取得
+          # -z: NULLデリミタで出力（スペース入りファイル名対応）
+          git config core.quotePath false
+          FILES=$(git diff --name-only -z HEAD~1 HEAD -- 'knowledge/*.md' | tr '\0' '|')
+          echo "files=$FILES" >> $GITHUB_OUTPUT
+          echo "対象ファイル: $FILES"
+
+      - name: 対象ファイルが存在するか確認
+        id: check
+        run: |
+          if [ -z "${{ steps.changed.outputs.files }}" ]; then
+            echo "skip=true" >> $GITHUB_OUTPUT
+            echo "対象ファイルなし。スキップします。"
+          else
+            echo "skip=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Setup Python
+        if: steps.check.outputs.skip == 'false'
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: 依存パッケージインストール
+        if: steps.check.outputs.skip == 'false'
+        run: pip install openai neo4j python-frontmatter -q
+
+      - name: Neo4jへグラフ登録
+        if: steps.check.outputs.skip == 'false'
+        env:
+          CHANGED_FILES:    ${{ steps.changed.outputs.files }}
+          OPENAI_API_KEY:   ${{ secrets.OPENAI_API_KEY }}
+          NEO4J_URI:        ${{ secrets.NEO4J_URI }}
+          NEO4J_USERNAME:   ${{ secrets.NEO4J_USERNAME }}
+          NEO4J_PASSWORD:   ${{ secrets.NEO4J_PASSWORD }}
+        run: python scripts/register_graph.py
