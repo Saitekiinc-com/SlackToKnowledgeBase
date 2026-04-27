@@ -1,0 +1,49 @@
+name: ナレッジ検索（Slack）
+
+on:
+  repository_dispatch:
+    types: [search-knowledge-slack]
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  search-slack:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: リポジトリをチェックアウト
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: 依存パッケージインストール
+        run: pip install openai neo4j -q
+
+      - name: Neo4j ナレッジグラフ検索 & Slack 応答
+        env:
+          QUERY:             ${{ github.event.client_payload.query }}
+          OPENAI_API_KEY:    ${{ secrets.OPENAI_API_KEY }}
+          NEO4J_URI:         ${{ secrets.NEO4J_URI }}
+          NEO4J_USERNAME:    ${{ secrets.NEO4J_USERNAME }}
+          NEO4J_PASSWORD:    ${{ secrets.NEO4J_PASSWORD }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          SLACK_CHANNEL_ID:  ${{ github.event.client_payload.channel_id }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: python scripts/search_graph_slack.py
+
+      - name: エラー通知（Slack）
+        if: failure()
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          WORKFLOW_NAME:     ${{ github.workflow }}
+          RUN_URL:           ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          curl -s -X POST "$SLACK_WEBHOOK_URL" \
+            -H "Content-Type: application/json" \
+            -d "{\"text\": \"❌ *[$WORKFLOW_NAME]* ワークフローでエラーが発生しました。\n詳細: $RUN_URL\"}"
