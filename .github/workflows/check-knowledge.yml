@@ -1,0 +1,62 @@
+name: ナレッジ風化チェック
+
+on:
+  schedule:
+    # 月曜 05:00 JST = 日曜 20:00 UTC
+    - cron: '0 20 * * 0'
+  workflow_dispatch:
+    inputs:
+      check_days:
+        description: 'knowledge→check 移動の日数閾値（デフォルト: 環境変数 or 30）'
+        required: false
+        type: string
+      invalid_days:
+        description: 'check→invalid 移動の日数閾値（デフォルト: 環境変数 or 90）'
+        required: false
+        type: string
+
+env:
+  KNOWLEDGE_CHECK_DAYS: ${{ inputs.check_days || vars.KNOWLEDGE_CHECK_DAYS || '30' }}
+  KNOWLEDGE_INVALID_DAYS: ${{ inputs.invalid_days || vars.KNOWLEDGE_INVALID_DAYS || '90' }}
+
+jobs:
+  check-and-invalidate:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: リポジトリをチェックアウト
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: 依存パッケージインストール
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: ナレッジの風化チェック・移動・通知・Neo4j削除
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          AUTHOR_SLACK_MAP: ${{ secrets.AUTHOR_SLACK_MAP }}
+          NEO4J_URI: ${{ secrets.NEO4J_URI }}
+          NEO4J_USERNAME: ${{ secrets.NEO4J_USERNAME }}
+          NEO4J_PASSWORD: ${{ secrets.NEO4J_PASSWORD }}
+        run: python scripts/check_knowledge.py
+
+      - name: 変更をコミット・プッシュ
+        run: |
+          git config user.email "github-actions@github.com"
+          git config user.name "GitHub Actions"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "変更なし。コミットをスキップします。"
+          else
+            git commit -m "chore: ナレッジ風化チェック ($(date -u +%Y-%m-%d))"
+            git push
+          fi
